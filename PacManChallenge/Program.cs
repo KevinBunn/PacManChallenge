@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Data;
 using System.Net;
 
+
 /**
  * Grab the pellets as fast as you can!
  **/
@@ -26,11 +27,12 @@ using System.Net;
 
 public enum MapItem
 {
-    Wall,
-    Empty,
-    Pellet,
-    Super,
-    Unknown
+    Wall = -1,
+    Empty = 0,
+    Unknown = 1,
+    Pellet = 2,
+    Super = 3
+    
 }
 
 public class Distance
@@ -81,12 +83,15 @@ public class Pellet
 {
     public Position Position { get; set; }
     public int value;
+
+    public int lastSeen;
     // public bool chosen;
 
     public Pellet(Position position, int value)
     {
         Position = position;
         this.value = value;
+        lastSeen = 0;
     }
 }
 
@@ -115,7 +120,6 @@ public class PacMan
         this.speedTurns = speedTurns;
         this.cooldown = cooldown;
     }
-
 }
 public class Enemy : PacMan
 {
@@ -138,7 +142,8 @@ public class Friendly : PacMan
     public int pursuingId;
     public int avoidingPacId;
     public bool hasGoal;
-    public Position goal;
+    public List<Goal> goals;
+    
 
     public Friendly()
     {
@@ -148,9 +153,9 @@ public class Friendly : PacMan
         pursuingId = -1;
         avoidingPacId = -1;
         hasGoal = false;
-        goal = new Position(0,0);
+        // goals = GameS;
     }
-    public Friendly(bool isAvoiding, int avoidingCooldown, int avoidingPacId, bool isPursuing, int pursuingId, bool hasGoal, Position goal)
+    public Friendly(bool isAvoiding, int avoidingCooldown, int avoidingPacId, bool isPursuing, int pursuingId, bool hasGoal, List<Goal> goals)
     {
         this.isAvoiding = isAvoiding;
         this.avoidingCooldown = avoidingCooldown;
@@ -158,7 +163,7 @@ public class Friendly : PacMan
         this.isPursuing = isPursuing;
         this.pursuingId = pursuingId;
         this.hasGoal = hasGoal;
-        this.goal = goal;
+        this.goals = goals;
     }
 
     // return a command
@@ -294,6 +299,24 @@ public class Friendly : PacMan
     }
 }
 
+public class Goal
+{
+    public int value;
+    public Position position;
+    public MapItem type;
+    public int distance;
+
+    public Goal(Position position,  MapItem type)
+    {
+        this.position = position;
+        this.type = type;
+    }
+
+    public void Update(Position pacPosition)
+    {
+        var distance = Player.FindShortestPath(pacPosition, position).Length;
+    }
+}
 public class GameState
 {
     // This is where I keep track of where the game is at.
@@ -305,12 +328,14 @@ public class GameState
     public List<Enemy> EnemyPacs;
     public bool[,] PacTrail;
     public int turn;
+    public List<Goal> goals;
 
     public GameState()
     {
         FriendlyPacs = new List<Friendly>();
         EnemyPacs = new List<Enemy>();
         turn = 1;
+        goals = new List<Goal>();
     }
 
     public void InitMap(int width, int height)
@@ -342,7 +367,7 @@ class Player
     {
         Position start = new Position(4, 7);
         Position end = new Position(8, 5);
-        Console.Error.WriteLine($"Starting at {start.x}, {start.y}");
+        // Console.Error.WriteLine($"Starting at {start.x}, {start.y}");
         while (start != end)
         {
             var paths = FindShortestPath(start, end);
@@ -366,7 +391,7 @@ class Player
             if( path.Length < closestLength)
             {
                 closestLength = path.Length;
-                Console.Error.WriteLine($"Pellet at {p.Position.x}, {p.Position.y} is shortest for ${pac.id}");
+                // Console.Error.WriteLine($"Pellet at {p.Position.x}, {p.Position.y} is shortest for ${pac.id}");
                 cX = p.Position.x;
                 cY = p.Position.y;
             }
@@ -485,7 +510,7 @@ class Player
     public static Position[] FindShortestPath(Position start, Position end) 
     {
         
-        // List containing of a Tuple that tracks where we should go, and where we've been.
+        // List containing of a Tuple that tracks where we should, and where we've been.
         List<Tuple<Position, Position[]>> searchQueue = new List<Tuple<Position, Position[]>>();
         // We need to know if we've already been somewhere
         bool[,] breadCrumbs = new bool[gameState.MapWidth, gameState.MapHeight];
@@ -501,7 +526,7 @@ class Player
             if (start == end)
             {
                 // we got it! return the path
-                Console.Error.WriteLine($"Number of Moves = {start.dist}");
+                // Console.Error.WriteLine($"Number of Moves = {start.dist}");
                 return path.Length > 1 ? path : new[] {start, end};
             }
 
@@ -558,6 +583,7 @@ class Player
         foreach (var pac in visableEnemies)
         {
             gameState.Map[pac.Position.x, pac.Position.y] = MapItem.Empty;
+            
         }        
         foreach (var pac in myPacs)
         {
@@ -568,10 +594,13 @@ class Player
             if (pellet.value == 10)
             {
                 gameState.Map[pellet.Position.x, pellet.Position.y] = MapItem.Super;
+                var updatedGoals = gameState.goals.Where(g => g.position == pellet.Position).Select(g => new Goal(pellet.Position, MapItem.Super ));
+                gameState.goals = updatedGoals.ToList();
             }
             else
             {
                 gameState.Map[pellet.Position.x, pellet.Position.y] = MapItem.Pellet;
+                gameState.goals.Where(g => g.position == pellet.Position).Select(g => new Goal(pellet.Position, MapItem.Super ));
             }
         }
     }
@@ -612,12 +641,29 @@ class Player
         pac.isAvoiding = true;
         pac.avoidingCooldown = 3;
         Position newQuadPos = FindNewSpot(pac, friendlyPacs.Find(p => p.id == pac.avoidingPacId));
-        pac.hasGoal = true;
-        pac.goal = newQuadPos;
+        // pac.hasGoal = true;
+        // pac.goal = newQuadPos;
         var nextStep = FindShortestPath(pac.Position, newQuadPos)[1];
-        return $"Move {pac.id} {nextStep.x} {nextStep.y} A{nextStep.x}, {nextStep.y}";
+        return $"Move {pac.id} {nextStep.x} {nextStep.y} {nextStep}";
     }
 
+    public static List<Goal> SortGoals(Friendly pac)
+    {
+        foreach (var goal in pac.goals)
+        {
+            goal.Update(pac.Position);
+        }
+        return pac.goals.OrderByDescending(g =>
+        {
+            Console.Error.WriteLine($"{pac.id} searching: {g.type}");
+            return (int) g.type;
+        }).ThenBy(g =>
+        {
+            Console.Error.WriteLine(g.distance);
+            return g.distance;
+        }).ToList();
+    }
+    
     public static string MoveToPellets(Friendly pac, List<Pellet> littlePelletList, List<Pellet> bigPelletList, List<Friendly> friendlyPacs)
     {
         if (isFriendlyPacTooClose(pac, friendlyPacs.FindAll(p => p.id != pac.id)))
@@ -654,7 +700,7 @@ class Player
 
     static void Challenge(string[] inputs)
     {
-              while (true)
+        while (true)
         {
             inputs = Console.ReadLine().Split(' ');
             // I need to use these eventually...
@@ -678,13 +724,15 @@ class Player
                     {
                         var initFriendly = new Friendly();
                         initFriendly.SetInfo(pacId, mine, new Position(x, y), typeId, speedTurnsLeft, abilityCooldown);
+                        // initFriendly.goals = gameState.goals;
                         friendlyPacs.Add(initFriendly);
                     }
                     else
                     {
                         var statePac = gameState.FriendlyPacs.Find(p => p.id == pacId);
-                        var myPac = new Friendly(statePac.isAvoiding, statePac.avoidingCooldown, statePac.avoidingPacId, statePac.isPursuing, statePac.pursuingId, statePac.hasGoal, statePac.goal);
+                        var myPac = new Friendly(statePac.isAvoiding, statePac.avoidingCooldown, statePac.avoidingPacId, statePac.isPursuing, statePac.pursuingId, statePac.hasGoal, statePac.goals);
                         myPac.SetInfo(pacId, mine, new Position(x, y), typeId, speedTurnsLeft, abilityCooldown);
+
                         friendlyPacs.Add(myPac);
                     }
                 }
@@ -735,135 +783,144 @@ class Player
                 
             }
                
+            
             UpdateMap(littlePelletList.Concat(bigPelletList).ToList(), friendlyPacs, enemyPacs);
+
+            
             // Write an action using Console.WriteLine()
             
 
             var commands = new List<string>();
             foreach (var pac in friendlyPacs)
             {
-                if (pac.isPursuing)
+                if (gameState.turn == 1)
                 {
-                    // This is unnecessarily aggresive, but it is fun to watch.
-                    if (pac.cooldown == 0)
-                    {
-                        // gain on them!
-                        commands.Add("Speed " + pac.id + " Pursuing");
-                        continue;
-                    }
-
-                    // can we see it? target them.
-                    if (enemyPacs.Exists(p => p.id == pac.pursuingId))
-                    {
-                        var target = enemyPacs.Find(p => p.id == pac.pursuingId);
-                        if (pac.speedTurns > 0)
-                        {
-                            // aim ahead of them in case we are speeding
-                            if (gameState.EnemyPacs.Exists(p => p.id == pac.pursuingId))
-                            {
-                                var targetLastTurn = gameState.EnemyPacs.Find(p => p.id == pac.pursuingId);
-                                // I'm trying to predict where it will move next. Need will keep track of walls eventually.
-                                var differenceX = target.Position.x - targetLastTurn.Position.x;
-                                var differenceY = target.Position.y - targetLastTurn.Position.y;
-                            
-                                commands.Add("MOVE " + pac.id + " " + ((target.Position.x + differenceX) % gameState.MapWidth) + " " + ((target.Position.y + differenceY) % gameState.MapHeight) + " Pursuing");
-                                continue;
-                            }
-                            // umm, not sure why we get here yet. Just going to default to look for pellet 
-                            commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                            continue;
-
-                        }
-
-                        commands.Add("MOVE " + pac.id + " " + target.Position.x + " " + target.Position.y + " Pursuing");
-                        continue;
-                    }
-
-                    // We can't see it, Move to last known position.
-                    if (gameState.EnemyPacs.Exists(p => p.id == pac.pursuingId))
-                    {
-                        var target = gameState.EnemyPacs.Find(p => p.id == pac.pursuingId);
-                        if (target.Position.x == pac.Position.x && target.Position.y == pac.Position.y)
-                        {
-                            // we lost it. go back to finding pellets
-                            pac.isPursuing = false;
-                            pac.pursuingId = -1;
-                            target.beingPursed = false;
-                            target.pursedById = -1;
-                            commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                            continue;
-                        }
-                        commands.Add("MOVE " + pac.id + " " + target.Position.x + " " + target.Position.y + " Pursuing");
-                        continue;
-                    }
-
-                    // Target nuetralized... Or we super lost it, I think?
-                    pac.isPursuing = false;
-                    pac.pursuingId = -1;
-                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                    continue;
-                }
-
-                var nearbyEnemyId = isEnemyPacNearby(pac, enemyPacs);
-                if (nearbyEnemyId != -1)
-                {
-                    var command = pac.RoShamBo(enemyPacs.Find(p => p.id == nearbyEnemyId));
-                    if (command == "ignore")
-                    {
-                        commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                        continue;
-                    }
-
-                    commands.Add(command);
-                    continue;
-                }
+                    pac.goals = gameState.goals;
+                }   
+//                if (pac.isPursuing)
+//                {
+//                    // This is unnecessarily aggresive, but it is fun to watch.
+//                    if (pac.cooldown == 0)
+//                    {
+//                        // gain on them!
+//                        commands.Add("Speed " + pac.id + " Pursuing");
+//                        continue;
+//                    }
+//
+//                    // can we see it? target them.
+//                    if (enemyPacs.Exists(p => p.id == pac.pursuingId))
+//                    {
+//                        var target = enemyPacs.Find(p => p.id == pac.pursuingId);
+//                        if (pac.speedTurns > 0)
+//                        {
+//                            // aim ahead of them in case we are speeding
+//                            if (gameState.EnemyPacs.Exists(p => p.id == pac.pursuingId))
+//                            {
+//                                var targetLastTurn = gameState.EnemyPacs.Find(p => p.id == pac.pursuingId);
+//                                // I'm trying to predict where it will move next. Need will keep track of walls eventually.
+//                                var differenceX = target.Position.x - targetLastTurn.Position.x;
+//                                var differenceY = target.Position.y - targetLastTurn.Position.y;
+//                            
+//                                commands.Add("MOVE " + pac.id + " " + ((target.Position.x + differenceX) % gameState.MapWidth) + " " + ((target.Position.y + differenceY) % gameState.MapHeight) + " Pursuing");
+//                                continue;
+//                            }
+//                            // umm, not sure why we get here yet. Just going to default to look for pellet 
+//                            commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+//                            continue;
+//
+//                        }
+//
+//                        commands.Add("MOVE " + pac.id + " " + target.Position.x + " " + target.Position.y + " Pursuing");
+//                        continue;
+//                    }
+//
+//                    // We can't see it, Move to last known position.
+//                    if (gameState.EnemyPacs.Exists(p => p.id == pac.pursuingId))
+//                    {
+//                        var target = gameState.EnemyPacs.Find(p => p.id == pac.pursuingId);
+//                        if (target.Position.x == pac.Position.x && target.Position.y == pac.Position.y)
+//                        {
+//                            // we lost it. go back to finding pellets
+//                            pac.isPursuing = false;
+//                            pac.pursuingId = -1;
+//                            target.beingPursed = false;
+//                            target.pursedById = -1;
+//                            commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+//                            continue;
+//                        }
+//                        commands.Add("MOVE " + pac.id + " " + target.Position.x + " " + target.Position.y + " Pursuing");
+//                        continue;
+//                    }
+//
+//                    // Target nuetralized... Or we super lost it, I think?
+//                    pac.isPursuing = false;
+//                    pac.pursuingId = -1;
+//                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+//                    continue;
+//                }
+//
+//                var nearbyEnemyId = isEnemyPacNearby(pac, enemyPacs);
+//                if (nearbyEnemyId != -1)
+//                {
+//                    var command = pac.RoShamBo(enemyPacs.Find(p => p.id == nearbyEnemyId));
+//                    if (command == "ignore")
+//                    {
+//                        commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+//                        continue;
+//                    }
+//
+//                    commands.Add(command);
+//                    continue;
+//                }
 
                 // This is what I need to work on, setting goals and moving towards them. this is incomplete atm
-                if (pac.hasGoal)
+                if (!pac.hasGoal)
                 {
-                    if (pac.Position == pac.goal)
-                    {
-                        // we made it, pick a new goal.
-                        // find nearest unchecked spot and nearest known pellet.
-                    }
-                    
-                    if (isFriendlyPacTooClose(pac, friendlyPacs.FindAll(p => p.id != pac.id)))
-                    {
-                        commands.Add(ChangeToAvoiding(pac, friendlyPacs));
-                        continue;
-                    }
-                    var nextStep = FindShortestPath(pac.Position, pac.goal)[1];
-                    commands.Add("MOVE " + pac.id + " " + nextStep.x + " " + nextStep.y + " Go");
-                    continue;
+                    pac.goals = SortGoals(pac);
+                    var goal = pac.goals.First();
+                    commands.Add("MOVE " + pac.id + " " + goal.position.x + " " + goal.position.y + $" {goal.position}");
+//                    if (pac.Position == pac.goal)
+//                    {
+//                        // we made it, pick a new goal.
+//                        // find nearest unchecked spot and nearest known pellet.
+//                    }
+//                    
+//                    if (isFriendlyPacTooClose(pac, friendlyPacs.FindAll(p => p.id != pac.id)))
+//                    {
+//                        commands.Add(ChangeToAvoiding(pac, friendlyPacs));
+//                        continue;
+//                    }
+//                    var nextStep = FindShortestPath(pac.Position, pac.goal)[1];
+//                    commands.Add("MOVE " + pac.id + " " + nextStep.x + " " + nextStep.y + " Go");
+//                    continue;
                 }
                 
                 // This is what I doing before I started tracking goals, this will probably be removed.
-                if (!pac.isAvoiding)
-                {
-                    if (gameState.turn == 2 && pac.cooldown == 0)
-                    {
-                        commands.Add("Speed " + pac.id);
-                        continue;
-                    }
-                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                    continue;
-                }
-
-                // default: avoid your friends and avoid collision. only sorta works.
-                pac.avoidingCooldown--;
-                if (pac.avoidingCooldown == 0)
-                {
-                    pac.isAvoiding = false;
-                }
-                Console.Error.WriteLine("going to fathest pellet");
-                if (friendlyPacs.Exists(p => p.id == pac.avoidingPacId))
-                {
-                    Position newQuadPos = FindNewSpot(pac, friendlyPacs.Find(p => p.id == pac.avoidingPacId));
-                    commands.Add("Move " + pac.id + " " + newQuadPos.x + " " + newQuadPos.y + " Avoid");
-                    continue;
-                }
-                // I guess our friend died :'( time to continue on with a normal life.
-                commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+//                if (!pac.isAvoiding)
+//                {
+//                    if (gameState.turn == 2 && pac.cooldown == 0)
+//                    {
+//                        commands.Add("Speed " + pac.id);
+//                        continue;
+//                    }
+//                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+//                    continue;
+//                }
+//
+//                // default: avoid your friends and avoid collision. only sorta works.
+//                pac.avoidingCooldown--;
+//                if (pac.avoidingCooldown == 0)
+//                {
+//                    pac.isAvoiding = false;
+//                }
+//                if (friendlyPacs.Exists(p => p.id == pac.avoidingPacId))
+//                {
+//                    Position newQuadPos = FindNewSpot(pac, friendlyPacs.Find(p => p.id == pac.avoidingPacId));
+//                    commands.Add("Move " + pac.id + " " + newQuadPos.x + " " + newQuadPos.y + " Avoid");
+//                    continue;
+//                }
+//                // I guess our friend died :'( time to continue on with a normal life.
+//                commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
                 
             }
             
@@ -904,14 +961,14 @@ class Player
 //        int width = map[0].Length;
 //        int height = map.Length;
         
-        Console.Error.WriteLine($"Width: {width}, Height {height}");
+        // Console.Error.WriteLine($"Width: {width}, Height {height}");
         gameState.InitMap(width, height);
         // var map = new Map(width, height);
         for (int i = 0; i < height; i++)
         {
             var row = Console.ReadLine(); // one line of the grid: space " " is floor, pound "#" is wall
             // var row = map[i];
-            Console.Error.WriteLine(row);
+            // Console.Error.WriteLine(row);
             // Build the map
             for (int j = 0; j < width; j++)
             {
@@ -922,6 +979,7 @@ class Player
                         break;
                     case ' ':
                         gameState.Map[j, i] = MapItem.Unknown;
+                        gameState.goals.Add(new Goal(new Position(j,i), MapItem.Unknown));
                         break;
                 }
             }
