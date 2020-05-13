@@ -1,10 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
-using System.Net;
-using System.Security;
 
 
 /**
@@ -331,6 +328,7 @@ public class GameState
     public bool[,] PacTrail;
     public int turn;
     public List<Goal> goals;
+    public bool bigPelletsGone;
 
     public GameState()
     {
@@ -338,6 +336,7 @@ public class GameState
         EnemyPacs = new List<Enemy>();
         turn = 1;
         goals = new List<Goal>();
+        bigPelletsGone = false;
     }
 
     public void InitMap(int width, int height)
@@ -379,13 +378,43 @@ class Player
     }
     public static GameState gameState = new GameState();
 
-    public static Position FindClosestPellet(Friendly pac, List<Pellet> pellets) {
+    public static bool IsCloserToOthers(Friendly pac, List<Friendly> friendlyPacs, Position p)
+    {
+        var closer = false;
+            
+        foreach (var friend in friendlyPacs)
+        {
+            if (Distance.Manhattan(p, friend.Position) > Distance.Manhattan(p, pac.Position))
+            {
+                closer = true;
+            }
+        }
+
+        return closer;
+    }
+    public static Position FindClosestPellet(Friendly pac, List<Pellet> pellets, List<Friendly> friendlyPacs)
+    {
+        var closerPellets = pellets.Where(p =>
+        {
+            var closer = false;
+            var lessThan10 = Distance.Manhattan(p.Position, pac.Position) < 10;
+            
+            foreach (var friend in friendlyPacs)
+            {
+                if (Distance.Manhattan(p.Position, friend.Position) > Distance.Manhattan(p.Position, pac.Position))
+                {
+                    closer = true;
+                }
+            }
+
+            return closer && lessThan10;
+        });
         // default to make anything closest
         int closestLength = int.MaxValue;
         // The coordinates of the closest pellet
         var cX = 0;
         var cY = 0;
-        foreach ( Pellet p in pellets )
+        foreach ( Pellet p in closerPellets )
         {
             // var distance = Distance.Manhattan(pac.Position, p.Position);
             var path = FindShortestPath(pac.Position, p.Position);
@@ -614,11 +643,23 @@ class Player
                 gameState.goals[gameState.goals.FindIndex(x => x.position == pellet.Position)] = updatedGoal;
             }
         }
+        if (!visablePellets.Exists(p => p.value == 10) && !gameState.bigPelletsGone)
+        {
+            // all the big pellets have been eaten, this needs to be set in case enemies ate the last one.
+            gameState.bigPelletsGone = true;
+            List<Goal> goalsToBeChanged = gameState.goals.Where(g => g.type == MapItem.Super).ToList();
+
+            foreach (var goal in goalsToBeChanged)
+            {
+                var updatedGoal = new Goal(goal.position, MapItem.Empty);
+                gameState.goals[gameState.goals.FindIndex(x => x.position == goal.position)] = updatedGoal;
+            }
+        }
     }
     
     public static bool isFriendlyPacTooClose(Friendly pac, List<Friendly> friendlies)
     {
-        float threashhold = 2;
+        float threashhold = 3;
         foreach ( Friendly p in friendlies )
         {
             var distance = Distance.Manhattan(pac.Position, p.Position);
@@ -655,31 +696,22 @@ class Player
         pac.hasGoal = true;
         pac.goal = new Goal(new Position(newQuadPos.x, newQuadPos.y), gameState.Map[newQuadPos.x,newQuadPos.y]);
         var nextStep = FindShortestPath(pac.Position, newQuadPos)[1];
-        return $"Move {pac.id} {nextStep.x} {nextStep.y} {nextStep}";
+        return $"Move {pac.id} {nextStep.x} {nextStep.y} A{pac.goal.position}";
     }
 
-    public static Goal FindNewGoal(Friendly pac)
+    public static Goal FindNewGoal(Friendly pac, List<Friendly> friendlyPacs)
     {
-        var potentialGoals = gameState.goals.Where(g => g.type == MapItem.Unknown || g.type == MapItem.Pellet);
-        var goals = potentialGoals.OrderByDescending(g =>
-        {
-            return (int) g.type;
-        }).ThenBy(g =>
-        {
-            return Distance.Manhattan(g.position, pac.Position);
-        }).ToList().Take(4);
-
-        return goals.OrderBy(g => { return FindShortestPath(pac.Position, g.position).Length; }).First();
+        var potentialGoals = gameState.goals.Where(g => g.type != MapItem.Empty && g.type != MapItem.Wall);
+        // Make a small goal list
+        return potentialGoals.OrderByDescending(g => (int) g.type)
+        .ThenByDescending(g => IsCloserToOthers(pac, friendlyPacs, g.position))
+        .ThenBy(g => Distance.Manhattan(g.position, pac.Position)).ToList()
+        .Take(4)
+        .OrderBy(g => FindShortestPath(pac.Position, g.position).Length).First();
     }
     
     public static string MoveToPellets(Friendly pac, List<Pellet> littlePelletList, List<Pellet> bigPelletList, List<Friendly> friendlyPacs)
     {
-        if (isFriendlyPacTooClose(pac, friendlyPacs.FindAll(p => p.id != pac.id)))
-        {
-            // We don't want to double up on the same pellets if possible
-            return ChangeToAvoiding(pac, friendlyPacs);
-        }
-
 //        if (pac.cooldown == 0)
 //        {
 //            return "Speed " + pac.id;
@@ -690,22 +722,21 @@ class Player
         if (bigPelletList.Any())
         {
             // Console.Error.WriteLine("going to big pellet");
-            closestPelletPos = FindClosestPellet(pac, bigPelletList);
+            closestPelletPos = FindClosestPellet(pac, bigPelletList, friendlyPacs);
             // All the big pellets are taken. find little ones instead.
             if (closestPelletPos.y == 0)
             {
-                closestPelletPos = FindClosestPellet(pac, littlePelletList);
+                closestPelletPos = FindClosestPellet(pac, littlePelletList, friendlyPacs);
             }
         }
         else
         {
-            closestPelletPos = FindClosestPellet(pac, littlePelletList);
-            // TODO: if returned 0.0 pick a new place on the map.
+            closestPelletPos = FindClosestPellet(pac, littlePelletList, friendlyPacs);
         }
 
         if (closestPelletPos.x == 0 && closestPelletPos.y == 0)
         {
-            pac.goal = FindNewGoal(pac);
+            pac.goal = FindNewGoal(pac, friendlyPacs);
             pac.hasGoal = true;
             return "Move " + pac.id + " " + pac.goal.position.x + " " + pac.goal.position.y + $" {pac.goal.position}";
         }
@@ -745,7 +776,7 @@ class Player
                     else
                     {
                         var statePac = gameState.FriendlyPacs.Find(p => p.id == pacId);
-                        var myPac = new Friendly(statePac.isAvoiding, statePac.avoidingCooldown, statePac.avoidingPacId, statePac.isPursuing, statePac.pursuingId, statePac.hasGoal, statePac.goal);
+                        var myPac = new Friendly(false, 0, -1, statePac.isPursuing, statePac.pursuingId, statePac.hasGoal, statePac.goal);
                         myPac.SetInfo(pacId, mine, new Position(x, y), typeId, speedTurnsLeft, abilityCooldown);
 
                         friendlyPacs.Add(myPac);
@@ -808,10 +839,22 @@ class Player
             var commands = new List<string>();
             foreach (var pac in friendlyPacs)
             {
+                var thisPacFriendlies = friendlyPacs.FindAll(p => p.id != pac.id);
                 if (gameState.turn == 1)
                 {
                     commands.Add("Speed " + pac.id);
                     continue;
+                }                
+                var pastPac = gameState.FriendlyPacs.Find(p => p.id == pac.id);
+                if (pastPac.Position == pac.Position && pac.cooldown < 9)
+                {
+                    // are we stuck by a friend?
+                    if (isFriendlyPacTooClose(pac, thisPacFriendlies))
+                    {
+                        commands.Add(ChangeToAvoiding(pac, thisPacFriendlies));
+                        continue;
+                    }
+                    // stuck by an enemy
                 }
                 var nearbyEnemyId = isEnemyPacNearby(pac, enemyPacs);
                 if (nearbyEnemyId != -1)
@@ -819,7 +862,7 @@ class Player
                     var command = pac.RoShamBo(enemyPacs.Find(p => p.id == nearbyEnemyId));
                     if (command == "ignore")
                     {
-                        commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+                        commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, thisPacFriendlies));
                         continue;
                     }
 
@@ -827,11 +870,24 @@ class Player
                     continue;
                 }
 
-                if (!pac.hasGoal)
+                if (pac.cooldown == 0)
                 {
-                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+                    commands.Add("Speed " + pac.id);
                     continue;
                 }
+                
+//                if (isFriendlyPacTooClose(pac, friendlyPacs.FindAll(p => p.id != pac.id)))
+//                {
+//                    // We don't want to double up on the same pellets if possible
+//                    commands.Add(ChangeToAvoiding(pac, friendlyPacs));
+//                    continue;
+//                }
+//
+//                if (!pac.hasGoal)
+//                {
+//                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, thisPacFriendlies));
+//                    continue;
+//                }
                 
                 
 //                if (pac.isPursuing)
@@ -898,23 +954,23 @@ class Player
 //
 
                 // This is what I need to work on, setting goals and moving towards them. this is incomplete atm
-                if (pac.goal.position == pac.Position)
-                {
-                    pac.hasGoal = false;
-                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                    continue;
-                }
-
-                if (gameState.Map[pac.goal.position.x, pac.goal.position.y] == MapItem.Empty)
-                {
-                    // it's already been eaten
-                    pac.hasGoal = false;
-                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-                    continue;
-                }
-                
+//                if (pac.goal.position == pac.Position)
+//                {
+//                    pac.hasGoal = false;
+//                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, thisPacFriendlies));
+//                    continue;
+//                }
+//
+//                if (gameState.Map[pac.goal.position.x, pac.goal.position.y] == MapItem.Empty)
+//                {
+//                    // it's already been eaten
+//                    pac.hasGoal = false;
+//                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, thisPacFriendlies));
+//                    continue;
+//                }
+                pac.goal = FindNewGoal(pac, thisPacFriendlies);
                 Console.Error.WriteLine($"{pac.id} going for {pac.goal.type}");
-                commands.Add("MOVE " + pac.id + " " + pac.goal.position.x + " " + pac.goal.position.y + $" {pac.goal.position}");
+                commands.Add("MOVE " + pac.id + " " + pac.goal.position.x + " " + pac.goal.position.y + $" G{pac.goal.position}");
 //                    if (pac.Position == pac.goal)
 //                    {
 //                        // we made it, pick a new goal.
