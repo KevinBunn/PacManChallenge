@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Net;
+using System.Security;
 
 
 /**
@@ -142,7 +143,7 @@ public class Friendly : PacMan
     public int pursuingId;
     public int avoidingPacId;
     public bool hasGoal;
-    public List<Goal> goals;
+    public Goal goal;
     
 
     public Friendly()
@@ -155,7 +156,7 @@ public class Friendly : PacMan
         hasGoal = false;
         // goals = GameS;
     }
-    public Friendly(bool isAvoiding, int avoidingCooldown, int avoidingPacId, bool isPursuing, int pursuingId, bool hasGoal, List<Goal> goals)
+    public Friendly(bool isAvoiding, int avoidingCooldown, int avoidingPacId, bool isPursuing, int pursuingId, bool hasGoal, Goal goal)
     {
         this.isAvoiding = isAvoiding;
         this.avoidingCooldown = avoidingCooldown;
@@ -163,7 +164,7 @@ public class Friendly : PacMan
         this.isPursuing = isPursuing;
         this.pursuingId = pursuingId;
         this.hasGoal = hasGoal;
-        this.goals = goals;
+        this.goal = goal;
     }
 
     // return a command
@@ -280,19 +281,19 @@ public class Friendly : PacMan
         // This isn't complete, This will occasionally error with out of bounds
         if (Position.x > enemy.Position.x)
         {
-            return "MOVE " + id + " " + (Position.x + 2) + " " + (Position.y) + " Avoiding";
+            return "MOVE " + id + " " + $"{Player.ClampX(Position.x + 3)}" + " " + (Position.y) + " Avoiding";
         }
         if (Position.y < enemy.Position.y)
         {
-            return "MOVE " + id + " " + (Position.x) + " " + (Position.y - 2) + " Avoiding";
+            return "MOVE " + id + " " + Position.x + " " + Player.ClampY(Position.x - 3) + " Avoiding";
         }        
         if (Position.x < enemy.Position.x)
         {
-            return "MOVE " + id + " " + (Position.x - 2) + " " + (Position.y) + " Avoiding";
+            return "MOVE " + id + " " + (Player.ClampX(Position.x - 3)) + " " + (Position.y) + " Avoiding";
         }        
         if (Position.y > enemy.Position.y)
         {
-            return "MOVE " + id + " " + (Position.x) + " " + Position.y + 2 + " Avoiding";
+            return "MOVE " + id + " " + Position.x + " " + $"{Player.ClampY(Position.x + 3)}" + " Avoiding";
         }
         // we probably dead idk
         return "ignore";
@@ -314,7 +315,8 @@ public class Goal
 
     public void Update(Position pacPosition)
     {
-        var distance = Player.FindShortestPath(pacPosition, position).Length;
+        distance = Player.FindShortestPath(pacPosition, position).Length;
+        Console.Error.WriteLine(distance);
     }
 }
 public class GameState
@@ -401,9 +403,13 @@ class Player
         return new Position(cX, cY);
     }
     
-    public static int Clamp( int value, int min, int max )
+    public static int ClampY( int value)
     {
-        return value < min ? min : value > max ? max : value;
+        return value < 0 ? 0 : value > gameState.MapHeight - 1 ? gameState.MapHeight - 1 : value;
+    }
+    public static int ClampX( int value)
+    {
+        return value < 0 ? 0 : value > gameState.MapWidth - 1 ? gameState.MapWidth - 1 : value;
     }
 
     public static Position FindNewSpot(Friendly pac, Friendly nearestPac)
@@ -435,20 +441,20 @@ class Player
         if (pac.Position.x > nearestPac.Position.x)
         {
             // go right
-            return new Position(Clamp(pac.Position.x + 3, 0, gameState.MapWidth - 1), pac.Position.y);
+            return new Position(ClampX(pac.Position.x + 3), pac.Position.y);
         }        
         if (pac.Position.x < nearestPac.Position.x)
         {
             // go left
-            return new Position(Clamp(pac.Position.x - 3, 0, gameState.MapWidth - 1), pac.Position.y);
+            return new Position(ClampX(pac.Position.x - 3), pac.Position.y);
         }        
         if (pac.Position.y > nearestPac.Position.y)
         {
             // go up
-            return new Position(pac.Position.x, Clamp(pac.Position.y + 3, 0, gameState.MapHeight - 1));
+            return new Position(pac.Position.x, ClampY(pac.Position.y + 3));
         }        
         // go down
-        return new Position(pac.Position.x, Clamp(pac.Position.y - 3,0, gameState.MapHeight - 1));
+        return new Position(pac.Position.x, ClampY(pac.Position.y - 3));
         
     }
 
@@ -583,31 +589,36 @@ class Player
         foreach (var pac in visableEnemies)
         {
             gameState.Map[pac.Position.x, pac.Position.y] = MapItem.Empty;
-            
+            var updatedGoal = new Goal(pac.Position, MapItem.Empty);
+            gameState.goals[gameState.goals.FindIndex(x => x.position == pac.Position)] = updatedGoal;
         }        
         foreach (var pac in myPacs)
         {
             gameState.Map[pac.Position.x, pac.Position.y] = MapItem.Empty;
+            var updatedGoal = new Goal(pac.Position, MapItem.Empty);
+            gameState.goals[gameState.goals.FindIndex(x => x.position == pac.Position)] = updatedGoal;
         }
         foreach (var pellet in visablePellets)
         {
             if (pellet.value == 10)
             {
                 gameState.Map[pellet.Position.x, pellet.Position.y] = MapItem.Super;
-                var updatedGoals = gameState.goals.Where(g => g.position == pellet.Position).Select(g => new Goal(pellet.Position, MapItem.Super ));
-                gameState.goals = updatedGoals.ToList();
+                
+                var updatedGoal = new Goal(pellet.Position, MapItem.Super);
+                gameState.goals[gameState.goals.FindIndex(x => x.position == pellet.Position)] = updatedGoal;
             }
             else
             {
                 gameState.Map[pellet.Position.x, pellet.Position.y] = MapItem.Pellet;
-                gameState.goals.Where(g => g.position == pellet.Position).Select(g => new Goal(pellet.Position, MapItem.Super ));
+                var updatedGoal = new Goal(pellet.Position, MapItem.Pellet);
+                gameState.goals[gameState.goals.FindIndex(x => x.position == pellet.Position)] = updatedGoal;
             }
         }
     }
     
     public static bool isFriendlyPacTooClose(Friendly pac, List<Friendly> friendlies)
     {
-        float threashhold = 4;
+        float threashhold = 2;
         foreach ( Friendly p in friendlies )
         {
             var distance = Distance.Manhattan(pac.Position, p.Position);
@@ -641,27 +652,24 @@ class Player
         pac.isAvoiding = true;
         pac.avoidingCooldown = 3;
         Position newQuadPos = FindNewSpot(pac, friendlyPacs.Find(p => p.id == pac.avoidingPacId));
-        // pac.hasGoal = true;
-        // pac.goal = newQuadPos;
+        pac.hasGoal = true;
+        pac.goal = new Goal(new Position(newQuadPos.x, newQuadPos.y), gameState.Map[newQuadPos.x,newQuadPos.y]);
         var nextStep = FindShortestPath(pac.Position, newQuadPos)[1];
         return $"Move {pac.id} {nextStep.x} {nextStep.y} {nextStep}";
     }
 
-    public static List<Goal> SortGoals(Friendly pac)
+    public static Goal FindNewGoal(Friendly pac)
     {
-        foreach (var goal in pac.goals)
+        var potentialGoals = gameState.goals.Where(g => g.type == MapItem.Unknown || g.type == MapItem.Pellet);
+        var goals = potentialGoals.OrderByDescending(g =>
         {
-            goal.Update(pac.Position);
-        }
-        return pac.goals.OrderByDescending(g =>
-        {
-            Console.Error.WriteLine($"{pac.id} searching: {g.type}");
             return (int) g.type;
         }).ThenBy(g =>
         {
-            Console.Error.WriteLine(g.distance);
-            return g.distance;
-        }).ToList();
+            return Distance.Manhattan(g.position, pac.Position);
+        }).ToList().Take(4);
+
+        return goals.OrderBy(g => { return FindShortestPath(pac.Position, g.position).Length; }).First();
     }
     
     public static string MoveToPellets(Friendly pac, List<Pellet> littlePelletList, List<Pellet> bigPelletList, List<Friendly> friendlyPacs)
@@ -693,6 +701,13 @@ class Player
         {
             closestPelletPos = FindClosestPellet(pac, littlePelletList);
             // TODO: if returned 0.0 pick a new place on the map.
+        }
+
+        if (closestPelletPos.x == 0 && closestPelletPos.y == 0)
+        {
+            pac.goal = FindNewGoal(pac);
+            pac.hasGoal = true;
+            return "Move " + pac.id + " " + pac.goal.position.x + " " + pac.goal.position.y + $" {pac.goal.position}";
         }
         // Console.Error.WriteLine(pac.id + "Moving to x: " + closestPelletPos.x + " y: " + closestPelletPos.y);
         return "Move " + pac.id + " " + closestPelletPos.x + " " + closestPelletPos.y + $" {closestPelletPos}";
@@ -730,7 +745,7 @@ class Player
                     else
                     {
                         var statePac = gameState.FriendlyPacs.Find(p => p.id == pacId);
-                        var myPac = new Friendly(statePac.isAvoiding, statePac.avoidingCooldown, statePac.avoidingPacId, statePac.isPursuing, statePac.pursuingId, statePac.hasGoal, statePac.goals);
+                        var myPac = new Friendly(statePac.isAvoiding, statePac.avoidingCooldown, statePac.avoidingPacId, statePac.isPursuing, statePac.pursuingId, statePac.hasGoal, statePac.goal);
                         myPac.SetInfo(pacId, mine, new Position(x, y), typeId, speedTurnsLeft, abilityCooldown);
 
                         friendlyPacs.Add(myPac);
@@ -785,7 +800,7 @@ class Player
                
             
             UpdateMap(littlePelletList.Concat(bigPelletList).ToList(), friendlyPacs, enemyPacs);
-
+            
             
             // Write an action using Console.WriteLine()
             
@@ -795,8 +810,30 @@ class Player
             {
                 if (gameState.turn == 1)
                 {
-                    pac.goals = gameState.goals;
-                }   
+                    commands.Add("Speed " + pac.id);
+                    continue;
+                }
+                var nearbyEnemyId = isEnemyPacNearby(pac, enemyPacs);
+                if (nearbyEnemyId != -1)
+                {
+                    var command = pac.RoShamBo(enemyPacs.Find(p => p.id == nearbyEnemyId));
+                    if (command == "ignore")
+                    {
+                        commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+                        continue;
+                    }
+
+                    commands.Add(command);
+                    continue;
+                }
+
+                if (!pac.hasGoal)
+                {
+                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+                    continue;
+                }
+                
+                
 //                if (pac.isPursuing)
 //                {
 //                    // This is unnecessarily aggresive, but it is fun to watch.
@@ -859,26 +896,25 @@ class Player
 //                    continue;
 //                }
 //
-//                var nearbyEnemyId = isEnemyPacNearby(pac, enemyPacs);
-//                if (nearbyEnemyId != -1)
-//                {
-//                    var command = pac.RoShamBo(enemyPacs.Find(p => p.id == nearbyEnemyId));
-//                    if (command == "ignore")
-//                    {
-//                        commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
-//                        continue;
-//                    }
-//
-//                    commands.Add(command);
-//                    continue;
-//                }
 
                 // This is what I need to work on, setting goals and moving towards them. this is incomplete atm
-                if (!pac.hasGoal)
+                if (pac.goal.position == pac.Position)
                 {
-                    pac.goals = SortGoals(pac);
-                    var goal = pac.goals.First();
-                    commands.Add("MOVE " + pac.id + " " + goal.position.x + " " + goal.position.y + $" {goal.position}");
+                    pac.hasGoal = false;
+                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+                    continue;
+                }
+
+                if (gameState.Map[pac.goal.position.x, pac.goal.position.y] == MapItem.Empty)
+                {
+                    // it's already been eaten
+                    pac.hasGoal = false;
+                    commands.Add(MoveToPellets(pac, littlePelletList, bigPelletList, friendlyPacs));
+                    continue;
+                }
+                
+                Console.Error.WriteLine($"{pac.id} going for {pac.goal.type}");
+                commands.Add("MOVE " + pac.id + " " + pac.goal.position.x + " " + pac.goal.position.y + $" {pac.goal.position}");
 //                    if (pac.Position == pac.goal)
 //                    {
 //                        // we made it, pick a new goal.
@@ -893,7 +929,6 @@ class Player
 //                    var nextStep = FindShortestPath(pac.Position, pac.goal)[1];
 //                    commands.Add("MOVE " + pac.id + " " + nextStep.x + " " + nextStep.y + " Go");
 //                    continue;
-                }
                 
                 // This is what I doing before I started tracking goals, this will probably be removed.
 //                if (!pac.isAvoiding)
