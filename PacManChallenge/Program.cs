@@ -703,11 +703,19 @@ class Player
     {
         var potentialGoals = gameState.goals.Where(g => g.type != MapItem.Empty && g.type != MapItem.Wall);
         // Make a small goal list
-        return potentialGoals.OrderByDescending(g => (int) g.type)
-        .ThenByDescending(g => IsCloserToOthers(pac, friendlyPacs, g.position))
+        var goals = potentialGoals.OrderByDescending(g => (int) g.type)
         .ThenBy(g => Distance.Manhattan(g.position, pac.Position)).ToList()
-        .Take(4)
-        .OrderBy(g => FindShortestPath(pac.Position, g.position).Length).First();
+        .Take(6)
+        .OrderByDescending(g => IsCloserToOthers(pac, friendlyPacs, g.position))
+        .ThenByDescending(g => (int) g.type)
+        .ThenBy(g => FindShortestPath(pac.Position, g.position).Length);
+
+        foreach (var goal in goals)
+        {
+            Console.Error.WriteLine($"{pac.id} is going to {goal.position} for {goal.type}");
+        }
+
+        return goals.First();
     }
     
     public static string MoveToPellets(Friendly pac, List<Pellet> littlePelletList, List<Pellet> bigPelletList, List<Friendly> friendlyPacs)
