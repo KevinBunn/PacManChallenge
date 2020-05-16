@@ -19,7 +19,7 @@ public class Util
                 }
                 else
                 {
-                    Console.Write(state.Map[x, y] == MapItem.Empty ? " " : "#");
+                    // Console.Write(state.Map[x, y] == MapItem.Empty ? " " : "#");
                 }
                 
             }
